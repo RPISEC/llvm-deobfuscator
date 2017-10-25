@@ -4,6 +4,7 @@
 from binaryninja import *
 from operator    import *
 from pprint      import *
+from itertools   import chain
 
 
 def VisitDefUse(bv, dispatchDef, mlil, cb):
@@ -101,8 +102,24 @@ def ApplyPatchesToCFG(bv, stateVar, CFG):
         curr = curr.outgoing_edges[0].target # True branch
         LinkBB1ToBB2(bv, prev, curr)
 
-    # XXX: now do unconditional branches, which may be
-    # *much* more difficult
+    if False:
+        # XXX: now do unconditional branches, which may be
+        # *much* more difficult
+        conditional = filter(lambda x:len(CFG[x]) > 1, CFG.keys())
+        print "[+] Identified conditional jumps"
+        pprint(conditional)
+
+    if False:
+        # XXX: now we remove the backbone layer, since this
+        # is now useless with the basic blocks linked together
+        # correctly
+        backbones = set(chain(*map(lambda x: x.values(), CFG.values())))
+        print "[+] Identified backbone blocks:"
+        pprint(backbones)
+        for back in backbones:
+            prev = back.incoming_edges[0].source
+            next = back.outgoing_edges[1].target # False branch
+            LinkBB1ToBB2(bv, prev, next)
 
 
 """
