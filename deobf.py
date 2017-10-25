@@ -6,11 +6,23 @@ from pprint      import *
 from itertools   import chain
 
 
+def safe_asm(bv, asm_str):
+    asm, err = bv.arch.assemble(asm_str)
+    if asm is None:
+        raise Exception(err)
+    return asm
+
+
 class CFGLink(object):
-    def __init__(self, block, true_block, false_block=None):
+    def __init__(self, block, true_block, false_block=None, def_il=None):
+        self.il = def_il  # The definition il we used to find this link
         self.block = block
-        self.true_block = true_block
+
+        self.backbone_blocks = [true_block, false_block]
+        self.true_block = true_block.outgoing_edges[0].target
         self.false_block = false_block
+        if self.false_block is not None:
+            self.false_block = self.false_block.outgoing_edges[0].target
 
     @property
     def is_uncond(self):
@@ -19,6 +31,44 @@ class CFGLink(object):
     @property
     def is_cond(self):
         return not self.is_uncond
+
+    def gen_asm(self, bv, base_addr):
+        # It's assumed that base_addr is the start of free space
+        # at the end of a newly recovered block
+        def rel(addr):
+            return hex(addr - base_addr).rstrip('L')
+
+        # Unconditional jmp
+        if self.is_uncond:
+            next_addr = self.true_block.start
+            print "[+] Patching from {:x} to {:x}".format(base_addr, next_addr)
+            return safe_asm(bv, "jmp {}".format(rel(next_addr)))
+
+        # Branch based on original cmovcc
+        else:
+            assert self.il is not None
+            true_addr = self.true_block.start
+            false_addr = self.false_block.start
+            print "[+] Patching from {:x} to T: {:x} F: {:x}".format(base_addr,
+                                                                     true_addr,
+                                                                     false_addr)
+
+            # Find the cmovcc by looking at the def il's incoming edges
+            # Both parent blocks are part of the same cmov
+            il_bb = next(bb for bb in self.il.function if bb.start <= self.il.instr_index < bb.end)
+            cmov_addr = il_bb.incoming_edges[0].source[-1].address
+            cmov = bv.get_disassembly(cmov_addr).split(' ')[0]
+
+            # It was actually painful to write this
+            jmp_instr = cmov.replace('cmov', 'j')
+
+            # Generate the branch instructions
+            asm = safe_asm(bv, '{} {}'.format(jmp_instr, rel(true_addr)))
+            base_addr += len(asm)
+            asm += safe_asm(bv, 'jmp {}'.format(rel(false_addr)))
+
+            return asm
+
 
     def __repr__(self):
         if self.is_uncond:
@@ -45,13 +95,6 @@ def VisitDefUse(bv, dispatchDef, mlil, cb):
                 else:
                     DFS(dispatchDef)
     DFS(dispatchDef)
-
-
-def ValOrVals(valueSet):
-    try:
-        return set([valueSet.value])
-    except:
-        return valueSet.values
 
 
 def ComputeBackboneCmps(bv, mlil, stateVar):
@@ -84,7 +127,7 @@ def ResolveCFGLink(bv, mlil, il, backbone):
 
     # Unconditional jumps will set the state to a constant
     if il.src.operation == MediumLevelILOperation.MLIL_CONST:
-        return CFGLink(bb, backbone[il.src.constant])
+        return CFGLink(bb, backbone[il.src.constant], def_il=il)
 
     # Conditional jumps choose between two values
     else:
