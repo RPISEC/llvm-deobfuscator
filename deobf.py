@@ -79,14 +79,14 @@ def DeObfuscateOLLVM(bv, addr):
 
 
 def LinkBB1ToBB2(bv, bb1, bb2):
-    prev = bb1.get_disassembly_text()[-1].address
-    next = bb2.start
+    prev_addr = bb1.get_disassembly_text()[-1].address
+    next_addr = bb2.start
 
-    print "[+] Patching from {:x} to {:x}".format(prev, next)
-    jmp, err = bv.arch.assemble("jmp {}".format(hex(next-prev).rstrip("L")))
+    print "[+] Patching from {:x} to {:x}".format(prev_addr, next_addr)
+    jmp, err = bv.arch.assemble("jmp {}".format(hex(next_addr-prev_addr).rstrip("L")))
     if jmp is None:
         raise Exception(err)
-    bv.write(prev, jmp)                # XXX: do we have enough space?
+    bv.write(prev_addr, jmp)                # XXX: do we have enough space?
 
 
 def ApplyPatchesToCFG(bv, stateVar, CFG):
@@ -116,9 +116,9 @@ def ApplyPatchesToCFG(bv, stateVar, CFG):
         print "[+] Identified backbone blocks:"
         pprint(backbones)
         for back in backbones:
-            prev = back.incoming_edges[0].source
-            next = back.outgoing_edges[1].target # False branch
-            LinkBB1ToBB2(bv, prev, next)
+            prev_bb = back.incoming_edges[0].source
+            next_bb = back.outgoing_edges[1].target # False branch
+            LinkBB1ToBB2(bv, prev_bb, next_bb)
 
 
 """
