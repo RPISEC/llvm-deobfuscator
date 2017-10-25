@@ -145,7 +145,6 @@ def ResolveCFGLink(bv, mlil, il, backbone):
 def gather_defs(il, defs):
     defs.add(il.address)
     op = il.operation
-    print hex(il.address), op, il
 
     if op == MediumLevelILOperation.MLIL_CONST:
         return
@@ -168,7 +167,7 @@ def clean_block(bv, mlil, link):
     block = link.block
     nop_addrs = {block.disassembly_text[-1].address}
 
-    # Gather all address related to the state variable
+    # Gather all addresses related to the state variable
     if link.il is not None:
         gather_defs(link.il.ssa_form, nop_addrs)
 
@@ -178,7 +177,6 @@ def clean_block(bv, mlil, link):
     while addr < block.end:
         ilen = bv.get_instruction_length(addr)
         if addr not in nop_addrs:
-            # print 'adding', bv.get_disassembly(addr)
             data += bv.read(addr, ilen)
         addr += ilen
     return data, block.start + len(data)
