@@ -108,7 +108,6 @@ def ComputeBackboneCmps(bv, mlil, stateVar):
 
 def ComputeOriginalBlocks(bv, mlil, stateVar):
     original = mlil.get_var_definitions(stateVar)
-    original = original[1:]         # XXX: is this a good assumption?
     return itemgetter(*original)(mlil)
 
 
@@ -210,24 +209,12 @@ def clean_block(bv, mlil, link):
     return data, block.start + len(data)
 
 
-def patch_link(bv, mlil, link):
-    blockdata, cave_addr = clean_block(bv, mlil, link)
-    blockdata += link.gen_asm(bv, cave_addr)
-    bv.write(link.block.start, blockdata)
-
-
 def ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone):
     print '[+] Patching all discovered links'
-    for prev in CFG:
-        patch_link(bv, mlil, prev)
-
-    # All of the inner blocks are now correctly linked together
-    # All that's left to do is find the target of the first block and link them
-    # The whole backbone becomes a code cave as a result
-    print '[+] Patching first block to delete backbone'
-    init_bb = bv.get_basic_blocks_at(stateVarInit.address)[0]
-    next_bb = backbone[stateVarInit.src.constant]
-    patch_link(bv, mlil, CFGLink(init_bb, next_bb, def_il=stateVarInit))
+    for link in CFG:
+        blockdata, cave_addr = clean_block(bv, mlil, link)
+        blockdata += link.gen_asm(bv, cave_addr)
+        bv.write(link.block.start, blockdata)
 
 
 """
