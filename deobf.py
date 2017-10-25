@@ -30,13 +30,7 @@ def ValOrVals(valueSet):
         return valueSet.values
 
 
-def DeObfuscateOLLVM(bv, addr):
-    func = bv.get_basic_blocks_at(addr)[0].function
-    mlil = func.medium_level_il
-    stateVar = func.get_low_level_il_at(addr).medium_level_il
-    stateVar = stateVar.dest
-
-    # compute all usages of the stateVar using a DFS
+def ComputeBackboneCmps(bv, mlil, stateVar):
     backbone = { }
     def VisitBackboneCB(dispatchDef):
         if dispatchDef.operation             == MediumLevelILOperation.MLIL_SET_VAR and \
@@ -45,16 +39,31 @@ def DeObfuscateOLLVM(bv, addr):
                 bv.get_basic_blocks_at(dispatchDef.address)[0]
 
     backboneDef = mlil.get_var_definitions(stateVar)
-    backboneDef = backboneDef[0]  # XXX: is this a good assumption?
+    backboneDef = backboneDef[0]    # XXX: is this a good assumption?
     VisitDefUse(bv, mlil[backboneDef], mlil, VisitBackboneCB)
+    return backbone
+
+
+def ComputeOriginalBlocks(bv, mlil, stateVar):
+    original = mlil.get_var_definitions(stateVar)
+    original = original[1:]         # XXX: is this a good assumption?
+    return itemgetter(*original)(mlil)
+
+
+def DeObfuscateOLLVM(bv, addr):
+    func = bv.get_basic_blocks_at(addr)[0].function
+    mlil = func.medium_level_il
+    stateVar = func.get_low_level_il_at(addr).medium_level_il
+    stateVar = stateVar.dest
+
+    # compute all usages of the stateVar using a DFS
+    backbone = ComputeBackboneCmps(bv, mlil, stateVar)
     print "[+] Computed backbone"
     pprint(backbone)
 
     # compute all the usages of the stateVar in the original basic blocks
-    original = mlil.get_var_definitions(stateVar)
-    original = original[1:] # XXX: is this a good assumption?
-    original = itemgetter(*original)(mlil)
-    print "[+] Usages of the state variable"
+    original = ComputeOriginalBlocks(bv, mlil, stateVar)
+    print "[+] Usages of the state variable in original basic blocks"
     pprint(original)
 
     # at this point we have all the information to reconstruct the CFG
@@ -66,6 +75,43 @@ def DeObfuscateOLLVM(bv, addr):
     print "[+] Computed original CFG"
     pprint(CFG)
 
+    ApplyPatchesToCFG(bv, stateVar, CFG)
+
+
+def LinkBB1ToBB2(bv, bb1, bb2):
+    prev = bb1.get_disassembly_text()[-1].address
+    next = bb2.start
+
+    print "[+] Patching from {:x} to {:x}".format(prev, next)
+    jmp, err = bv.arch.assemble("jmp {}".format(hex(next-prev).rstrip("L")))
+    if jmp is None:
+        raise Exception(err)
+    bv.write(prev, jmp)                # XXX: do we have enough space?
+
+
+def ApplyPatchesToCFG(bv, stateVar, CFG):
+    # first link up all basic blocks with only a
+    # single outgoing edge
+    unconditional = filter(lambda x:len(CFG[x]) == 1, CFG.keys())
+    print "[+] Identified unconditional jumps"
+    pprint(unconditional)
+
+    for prev in unconditional:
+        curr = CFG[prev].values()[0]
+        curr = curr.outgoing_edges[0].target # True branch
+        LinkBB1ToBB2(bv, prev, curr)
+
+    # XXX: now do unconditional branches, which may be
+    # *much* more difficult
+
+
+"""
+{ <block: x86_64@0x4061df-0x406240: {0x37aaf505: <block: x86_64@0x406198-0x4061a9>,
+                                     0x45260b82: <block: x86_64@0x4061ae-0x4061bf>},
+  <block: x86_64@0x406309-0x40636d: {0x45260b82: <block: x86_64@0x4061ae-0x4061bf>},
+  <block: x86_64@0x406240-0x4062fe: {0x37aaf505: <block: x86_64@0x406198-0x4061a9>,
+                                     0xec95166a: <block: x86_64@0x40617c-0x406193>}}
+"""
 
 PluginCommand.register_for_address("Deobfuscate (OLLVM)",
         "Remove Control Flow Flattening given switch variable",

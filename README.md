@@ -15,3 +15,8 @@ mov dword [rbp-0xf8], 0x962e7c4e
 ```
 
 with minor variations in the large constant and variable offset.
+
+For more information on llvm obfuscator itself, the [source][llvm-obfuscator] is an
+obvious ground truth :)
+
+[llvm-obfuscator]: https://github.com/obfuscator-llvm/obfuscator/tree/llvm-4.0/lib/Transforms/Obfuscation
