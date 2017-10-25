@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python2
 
 from binaryninja import *
 from operator    import *
@@ -34,9 +33,9 @@ def ValOrVals(valueSet):
 def ComputeBackboneCmps(bv, mlil, stateVar):
     backbone = { }
     def VisitBackboneCB(dispatchDef):
-        if dispatchDef.operation             == MediumLevelILOperation.MLIL_SET_VAR and \
-           dispatchDef.operands[1].operation == MediumLevelILOperation.MLIL_CMP_E:
-            backbone[dispatchDef.operands[1].operands[1].value.value] = \
+        if dispatchDef.operation     == MediumLevelILOperation.MLIL_SET_VAR and \
+           dispatchDef.src.operation == MediumLevelILOperation.MLIL_CMP_E:
+            backbone[dispatchDef.src.right.constant] = \
                 bv.get_basic_blocks_at(dispatchDef.address)[0]
 
     backboneDef = mlil.get_var_definitions(stateVar)
@@ -62,7 +61,7 @@ def DeObfuscateOLLVM(bv, addr):
     print "[+] Computed backbone"
     pprint(backbone)
 
-    # compute all the usages of the stateVar in the original basic blocks
+    # compute all the defs of the stateVar in the original basic blocks
     original = ComputeOriginalBlocks(bv, mlil, stateVar)
     print "[+] Usages of the state variable in original basic blocks"
     pprint(original)
