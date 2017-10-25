@@ -6,6 +6,30 @@ from pprint      import *
 from itertools   import chain
 
 
+class CFGLink(object):
+    def __init__(self, block, true_block, false_block=None):
+        self.block = block
+        self.true_block = true_block
+        self.false_block = false_block
+
+    @property
+    def is_uncond(self):
+        return self.false_block is None
+
+    @property
+    def is_cond(self):
+        return not self.is_uncond
+
+    def __repr__(self):
+        if self.is_uncond:
+            return '<U Link: {} => {}>'.format(self.block,
+                                               self.true_block)
+        else:
+            return '<C Link: {} => T: {}, F: {}>'.format(self.block,
+                                                         self.true_block,
+                                                         self.false_block)
+
+
 def VisitDefUse(bv, dispatchDef, mlil, cb):
     # perform a depth-first search on state variables
     def DFS(dispatchDef):
@@ -50,6 +74,38 @@ def ComputeOriginalBlocks(bv, mlil, stateVar):
     return itemgetter(*original)(mlil)
 
 
+def get_ssa_def(mlil, var):
+    return mlil.ssa_form[mlil.ssa_form.get_ssa_var_definition(var)]
+
+
+def ResolveCFGLink(bv, mlil, il, backbone):
+    # il refers to a definition of the stateVar
+    bb = bv.get_basic_blocks_at(il.address)[0]
+
+    # Unconditional jumps will set the state to a constant
+    if il.src.operation == MediumLevelILOperation.MLIL_CONST:
+        return CFGLink(bb, backbone[il.src.constant])
+
+    # Conditional jumps choose between two values
+    else:
+        # Go into SSA to figure out which state is the false branch
+        # Get the phi for the state variable at this point
+        phi = get_ssa_def(mlil, il.ssa_form.src.src)
+        assert phi.operation == MediumLevelILOperation.MLIL_VAR_PHI
+
+        # The cmov (select) will only ever replace the default value (false)
+        # with another if the condition passes (true)
+        # So all we need to do is take the earliest version of the SSA var
+        # as the false state
+        f_def, t_def = sorted(phi.src, key=lambda var: var.version)
+
+        # There will always be one possible value here
+        false_state = get_ssa_def(mlil, f_def).src.possible_values.value
+        true_state  = get_ssa_def(mlil, t_def).src.possible_values.value
+
+        return CFGLink(bb, backbone[true_state], backbone[false_state])
+
+
 def DeObfuscateOLLVM(bv, addr):
     func = bv.get_basic_blocks_at(addr)[0].function
     mlil = func.medium_level_il
@@ -67,11 +123,7 @@ def DeObfuscateOLLVM(bv, addr):
     pprint(original)
 
     # at this point we have all the information to reconstruct the CFG
-    CFG = { }
-    for il in original:
-        curr = bv.get_basic_blocks_at(il.address)[0]
-        vals = ValOrVals(il.src.possible_values)
-        CFG[curr] = { i:backbone[i] for i in vals }
+    CFG = [ResolveCFGLink(bv, mlil, il, backbone) for il in original]
     print "[+] Computed original CFG"
     pprint(CFG)
 
@@ -92,21 +144,19 @@ def LinkBB1ToBB2(bv, bb1, bb2):
 def ApplyPatchesToCFG(bv, stateVar, CFG):
     # first link up all basic blocks with only a
     # single outgoing edge
-    unconditional = filter(lambda x:len(CFG[x]) == 1, CFG.keys())
+    unconditional = filter(lambda x: x.is_uncond, CFG)
     print "[+] Identified unconditional jumps"
     pprint(unconditional)
 
     for prev in unconditional:
-        curr = CFG[prev].values()[0]
+        curr = prev.true_block
         curr = curr.outgoing_edges[0].target # True branch
-        LinkBB1ToBB2(bv, prev, curr)
+        LinkBB1ToBB2(bv, prev.block, curr)
 
-    if False:
-        # XXX: now do unconditional branches, which may be
-        # *much* more difficult
-        conditional = filter(lambda x:len(CFG[x]) > 1, CFG.keys())
-        print "[+] Identified conditional jumps"
-        pprint(conditional)
+    # now do conditional branches
+    conditional = filter(lambda x: x.is_cond, CFG)
+    print "[+] Identified conditional jumps"
+    pprint(conditional)
 
     if False:
         # XXX: now we remove the backbone layer, since this
