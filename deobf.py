@@ -79,34 +79,30 @@ class CFGLink(object):
                                                          self.false_block)
 
 
-def VisitDefUse(bv, dispatchDef, mlil, cb):
-    # perform a depth-first search on state variables
-    def DFS(dispatchDef):
-        cb(dispatchDef)
-        if hasattr(dispatchDef, "dest"):
-            dispatchDef = mlil.get_var_uses(dispatchDef.dest)
-            if len(dispatchDef) > 0:
-                dispatchDef = itemgetter(*dispatchDef)(mlil)
-                # there may be more than one possible usage
-                if isinstance(dispatchDef, tuple):
-                    for i in dispatchDef:
-                        DFS(i)
-                else:
-                    DFS(dispatchDef)
-    DFS(dispatchDef)
-
-
 def ComputeBackboneCmps(bv, mlil, stateVar):
-    backbone = { }
-    def VisitBackboneCB(dispatchDef):
-        if dispatchDef.operation     == MediumLevelILOperation.MLIL_SET_VAR and \
-           dispatchDef.src.operation == MediumLevelILOperation.MLIL_CMP_E:
-            backbone[dispatchDef.src.right.constant] = \
-                bv.get_basic_blocks_at(dispatchDef.address)[0]
+    backbone = {}
 
-    backboneDef = mlil.get_var_definitions(stateVar)
-    backboneDef = backboneDef[0]    # XXX: is this a good assumption?
-    VisitDefUse(bv, mlil[backboneDef], mlil, VisitBackboneCB)
+    # Find the variable that all subdispatchers use in comparisons
+    var = stateVar
+    uses = mlil.get_var_uses(var)
+    while len(uses) <= 2:
+        var = mlil[uses[-1]].dest
+        uses = mlil.get_var_uses(var)
+    uses += mlil.get_var_definitions(var)
+
+    # Gather the blocks where this is used
+    blks = (b for idx in uses for b in mlil.basic_blocks if b.start <= idx < b.end)
+
+    # In each of these blocks, find the value of the state
+    for bb in blks:
+        # Find the comparison
+        cond_var = bb[-1].condition.src
+        cmp_il = mlil[mlil.get_var_definitions(cond_var)[0]]
+
+        # Pull out the state value
+        state = cmp_il.src.right.constant
+        backbone[state] = bv.get_basic_blocks_at(bb[0].address)[0]
+
     return backbone
 
 
