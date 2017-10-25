@@ -146,14 +146,14 @@ def ResolveCFGLink(bv, mlil, il, backbone):
         false_state = get_ssa_def(mlil, f_def).src.possible_values.value
         true_state  = get_ssa_def(mlil, t_def).src.possible_values.value
 
-        return CFGLink(bb, backbone[true_state], backbone[false_state])
+        return CFGLink(bb, backbone[true_state], backbone[false_state], il)
 
 
 def DeObfuscateOLLVM(bv, addr):
     func = bv.get_basic_blocks_at(addr)[0].function
     mlil = func.medium_level_il
-    stateVar = func.get_low_level_il_at(addr).medium_level_il
-    stateVar = stateVar.dest
+    stateVarInit = func.get_low_level_il_at(addr).medium_level_il
+    stateVar = stateVarInit.dest
 
     # compute all usages of the stateVar using a DFS
     backbone = ComputeBackboneCmps(bv, mlil, stateVar)
@@ -170,48 +170,69 @@ def DeObfuscateOLLVM(bv, addr):
     print "[+] Computed original CFG"
     pprint(CFG)
 
-    ApplyPatchesToCFG(bv, stateVar, CFG)
+    ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone)
 
 
-def LinkBB1ToBB2(bv, bb1, bb2):
-    prev_addr = bb1.get_disassembly_text()[-1].address
-    next_addr = bb2.start
+def gather_defs(il, defs):
+    defs.add(il.address)
+    op = il.operation
+    print hex(il.address), op, il
 
-    print "[+] Patching from {:x} to {:x}".format(prev_addr, next_addr)
-    jmp, err = bv.arch.assemble("jmp {}".format(hex(next_addr-prev_addr).rstrip("L")))
-    if jmp is None:
-        raise Exception(err)
-    bv.write(prev_addr, jmp)                # XXX: do we have enough space?
+    if op == MediumLevelILOperation.MLIL_CONST:
+        return
+
+    if op == MediumLevelILOperation.MLIL_VAR_SSA_FIELD:
+        gather_defs(get_ssa_def(il.function, il.src), defs)
+
+    if op == MediumLevelILOperation.MLIL_VAR_PHI:
+        for var in il.src:
+            gather_defs(get_ssa_def(il.function, var), defs)
+
+    if hasattr(il, 'src') and isinstance(il.src, MediumLevelILInstruction):
+        gather_defs(il.src, defs)
 
 
-def ApplyPatchesToCFG(bv, stateVar, CFG):
-    # first link up all basic blocks with only a
-    # single outgoing edge
-    unconditional = filter(lambda x: x.is_uncond, CFG)
-    print "[+] Identified unconditional jumps"
-    pprint(unconditional)
+def clean_block(bv, mlil, link):
+    # Return the data for a block with all unnecessary instructions removed
 
-    for prev in unconditional:
-        curr = prev.true_block
-        curr = curr.outgoing_edges[0].target # True branch
-        LinkBB1ToBB2(bv, prev.block, curr)
+    # The terminator gets replaced anyway
+    block = link.block
+    nop_addrs = {block.disassembly_text[-1].address}
 
-    # now do conditional branches
-    conditional = filter(lambda x: x.is_cond, CFG)
-    print "[+] Identified conditional jumps"
-    pprint(conditional)
+    # Gather all address related to the state variable
+    if link.il is not None:
+        gather_defs(link.il.ssa_form, nop_addrs)
 
-    if False:
-        # XXX: now we remove the backbone layer, since this
-        # is now useless with the basic blocks linked together
-        # correctly
-        backbones = set(chain(*map(lambda x: x.values(), CFG.values())))
-        print "[+] Identified backbone blocks:"
-        pprint(backbones)
-        for back in backbones:
-            prev_bb = back.incoming_edges[0].source
-            next_bb = back.outgoing_edges[1].target # False branch
-            LinkBB1ToBB2(bv, prev_bb, next_bb)
+    # Rebuild the block, skipping the bad instrs
+    addr = block.start
+    data = ''
+    while addr < block.end:
+        ilen = bv.get_instruction_length(addr)
+        if addr not in nop_addrs:
+            # print 'adding', bv.get_disassembly(addr)
+            data += bv.read(addr, ilen)
+        addr += ilen
+    return data, block.start + len(data)
+
+
+def patch_link(bv, mlil, link):
+    blockdata, cave_addr = clean_block(bv, mlil, link)
+    blockdata += link.gen_asm(bv, cave_addr)
+    bv.write(link.block.start, blockdata)
+
+
+def ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone):
+    print '[+] Patching all discovered links'
+    for prev in CFG:
+        patch_link(bv, mlil, prev)
+
+    # All of the inner blocks are now correctly linked together
+    # All that's left to do is find the target of the first block and link them
+    # The whole backbone becomes a code cave as a result
+    print '[+] Patching first block to delete backbone'
+    init_bb = bv.get_basic_blocks_at(stateVarInit.address)[0]
+    next_bb = backbone[stateVarInit.src.constant]
+    patch_link(bv, mlil, CFGLink(init_bb, next_bb, def_il=stateVarInit))
 
 
 """
