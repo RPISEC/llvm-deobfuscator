@@ -18,7 +18,6 @@ class CFGLink(object):
         self.il = def_il  # The definition il we used to find this link
         self.block = block
 
-        self.backbone_blocks = [true_block, false_block]
         self.true_block = true_block.outgoing_edges[0].target
         self.false_block = false_block
         if self.false_block is not None:
@@ -236,11 +235,14 @@ def ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone):
 
 
 """
-{ <block: x86_64@0x4061df-0x406240: {0x37aaf505: <block: x86_64@0x406198-0x4061a9>,
-                                     0x45260b82: <block: x86_64@0x4061ae-0x4061bf>},
-  <block: x86_64@0x406309-0x40636d: {0x45260b82: <block: x86_64@0x4061ae-0x4061bf>},
-  <block: x86_64@0x406240-0x4062fe: {0x37aaf505: <block: x86_64@0x406198-0x4061a9>,
-                                     0xec95166a: <block: x86_64@0x40617c-0x406193>}}
+Example CFG:
+[<C Link: <block: x86_64@0x4006e7-0x400700> => T: <block: x86_64@0x400700-0x400720>, F: <block: x86_64@0x400735-0x400741>>,
+ <U Link: <block: x86_64@0x4006d4-0x4006e7> => <block: x86_64@0x4006e7-0x400700>>,
+ <U Link: <block: x86_64@0x400700-0x400720> => <block: x86_64@0x400720-0x400735>>,
+ <U Link: <block: x86_64@0x4006b4-0x4006d4> => <block: x86_64@0x400741-0x400749>>,
+ <U Link: <block: x86_64@0x400735-0x400741> => <block: x86_64@0x400741-0x400749>>,
+ <C Link: <block: x86_64@0x400699-0x4006b4> => T: <block: x86_64@0x4006b4-0x4006d4>, F: <block: x86_64@0x4006d4-0x4006e7>>,
+ <U Link: <block: x86_64@0x400720-0x400735> => <block: x86_64@0x4006e7-0x400700>>]
 """
 
 PluginCommand.register_for_address("Deobfuscate (OLLVM)",
