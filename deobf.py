@@ -1,5 +1,4 @@
 #!/usr/bin/env python2
-
 from binaryninja import *
 from operator    import *
 from pprint      import *
@@ -143,30 +142,6 @@ def ResolveCFGLink(bv, mlil, il, backbone):
         return CFGLink(bb, backbone[true_state], backbone[false_state], il)
 
 
-def DeObfuscateOLLVM(bv, addr):
-    func = bv.get_basic_blocks_at(addr)[0].function
-    mlil = func.medium_level_il
-    stateVarInit = func.get_low_level_il_at(addr).medium_level_il
-    stateVar = stateVarInit.dest
-
-    # compute all usages of the stateVar using a DFS
-    backbone = ComputeBackboneCmps(bv, mlil, stateVar)
-    print "[+] Computed backbone"
-    pprint(backbone)
-
-    # compute all the defs of the stateVar in the original basic blocks
-    original = ComputeOriginalBlocks(bv, mlil, stateVar)
-    print "[+] Usages of the state variable in original basic blocks"
-    pprint(original)
-
-    # at this point we have all the information to reconstruct the CFG
-    CFG = [ResolveCFGLink(bv, mlil, il, backbone) for il in original]
-    print "[+] Computed original CFG"
-    pprint(CFG)
-
-    ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone)
-
-
 def gather_defs(il, defs):
     defs.add(il.address)
     op = il.operation
@@ -209,10 +184,33 @@ def clean_block(bv, mlil, link):
     return data, block.start + len(data)
 
 
-def ApplyPatchesToCFG(bv, mlil, stateVarInit, CFG, backbone):
+def DeObfuscateOLLVM(bv, addr):
+    func = bv.get_basic_blocks_at(addr)[0].function
+    mlil = func.medium_level_il
+    stateVar = func.get_low_level_il_at(addr).medium_level_il.dest
+
+    # compute all usages of the stateVar
+    backbone = ComputeBackboneCmps(bv, mlil, stateVar)
+    print "[+] Computed backbone"
+    pprint(backbone)
+
+    # compute all the defs of the stateVar in the original basic blocks
+    original = ComputeOriginalBlocks(bv, mlil, stateVar)
+    print "[+] Usages of the state variable in original basic blocks"
+    pprint(original)
+
+    # at this point we have all the information to reconstruct the CFG
+    CFG = [ResolveCFGLink(bv, mlil, il, backbone) for il in original]
+    print "[+] Computed original CFG"
+    pprint(CFG)
+
+    # patch in all the changes
     print '[+] Patching all discovered links'
     for link in CFG:
+        # Clean out instructions we don't need to make space
         blockdata, cave_addr = clean_block(bv, mlil, link)
+
+        # Add the new instructions and patch
         blockdata += link.gen_asm(bv, cave_addr)
         bv.write(link.block.start, blockdata)
 
