@@ -215,6 +215,25 @@ def DeObfuscateOLLVM(bv, addr):
         bv.write(link.block.start, blockdata)
 
 
+class RunInBackground(BackgroundTaskThread):
+
+	def __init__(self, bv, addr, msg):
+		BackgroundTaskThread.__init__(self, msg, True)
+		self.bv = bv
+		self.addr = addr
+
+	def run(self):
+		bv = self.bv
+		bv.begin_undo_actions()
+		DeObfuscateOLLVM(bv, self.addr)
+		bv.commit_undo_actions()
+		bv.update_analysis()
+
+
+def OLLVMBackgrounder(bv, addr):
+	s = RunInBackground(bv, addr, "Removing Control Flow Flattening")
+	s.start()
+
 """
 Example CFG:
 [<C Link: <block: x86_64@0x4006e7-0x400700> => T: <block: x86_64@0x400700-0x400720>, F: <block: x86_64@0x400735-0x400741>>,
@@ -228,4 +247,4 @@ Example CFG:
 
 PluginCommand.register_for_address("Deobfuscate (OLLVM)",
         "Remove Control Flow Flattening given switch variable",
-        DeObfuscateOLLVM)
+        OLLVMBackgrounder)

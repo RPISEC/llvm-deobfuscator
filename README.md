@@ -19,4 +19,8 @@ with minor variations in the large constant and variable offset.
 For more information on llvm obfuscator itself, the [source][llvm-obfuscator] is an
 obvious ground truth :)
 
+## Installation
+
+Should just be able to git clone the repository into your plugins repository.
+
 [llvm-obfuscator]: https://github.com/obfuscator-llvm/obfuscator/tree/llvm-4.0/lib/Transforms/Obfuscation
