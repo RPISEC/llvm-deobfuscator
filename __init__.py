@@ -165,6 +165,7 @@ def clean_block(bv, mlil, link):
 
     # The terminator gets replaced anyway
     block = link.block
+    old_len = block.length
     nop_addrs = {block.disassembly_text[-1].address}
 
     # Gather all addresses related to the state variable
@@ -179,7 +180,24 @@ def clean_block(bv, mlil, link):
         if addr not in nop_addrs:
             data += bv.read(addr, ilen)
         addr += ilen
-    return data, block.start + len(data)
+    return data, block.start + len(data), old_len
+
+
+def gather_full_backbone(backbone_map):
+    """ Collect all blocks that are part of the backbone """
+    # Get the immediately known blocks from the map
+    backbone_blocks = backbone_map.values()
+    backbone_blocks += [bb.outgoing_edges[1].target for bb in backbone_blocks]
+
+    # Some of these blocks might be part of a chain of unconditional jumps back to the top of the backbone
+    # Find the rest of the blocks in the chain and add them to be removed
+    for bb in backbone_blocks:
+        blk = bb
+        while len(blk.outgoing_edges) == 1:
+            if blk not in backbone_blocks:
+                backbone_blocks.append(blk)
+            blk = blk.outgoing_edges[0].target
+    return set(backbone_blocks)
 
 
 def DeObfuscateOLLVM(bv, addr):
@@ -206,12 +224,18 @@ def DeObfuscateOLLVM(bv, addr):
     print '[+] Patching all discovered links'
     for link in CFG:
         # Clean out instructions we don't need to make space
-        blockdata, cave_addr = clean_block(bv, mlil, link)
+        blockdata, cave_addr, orig_len = clean_block(bv, mlil, link)
 
-        # Add the new instructions and patch
+        # Add the new instructions and patch, nop the rest of the block
         blockdata += link.gen_asm(bv, cave_addr)
+        blockdata = blockdata.ljust(orig_len, safe_asm(bv, 'nop'))
         bv.write(link.block.start, blockdata)
 
+    print "[+] NOPing backbone"
+    nop = safe_asm(bv, 'nop')
+    for bb in gather_full_backbone(backbone):
+        print 'NOPing block: {}'.format(bb)
+        bv.write(bb.start, nop * bb.length)
 
 class RunInBackground(BackgroundTaskThread):
 
