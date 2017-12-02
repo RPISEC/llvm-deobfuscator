@@ -22,7 +22,8 @@ def gather_defs(il, defs):
     if op == MediumLevelILOperation.MLIL_CONST:
         return
 
-    if op == MediumLevelILOperation.MLIL_VAR_SSA_FIELD:
+    if op in [MediumLevelILOperation.MLIL_VAR_SSA_FIELD,
+              MediumLevelILOperation.MLIL_VAR_SSA]:
         gather_defs(get_ssa_def(il.function, il.src), defs)
 
     if op == MediumLevelILOperation.MLIL_VAR_PHI:
