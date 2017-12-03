@@ -7,9 +7,21 @@ from .util       import *
 
 class CFGLink(object):
     def __init__(self, block, true_block, false_block=None, def_il=None):
+        """ Create a link from a block to its real successors
+
+        Args:
+            block (BasicBlock): block to start from
+            true_block (BasicBlock): The target block of an unconditional jump,
+                or the true branch of a conditional jump
+            false_block (BasicBlock): The false branch of a conditional jump
+            def_il (MediumLevelILInstruction): The instruction that was used
+                to discover this link. This will be a definition of the state
+                variable
+        """
         self.il = def_il  # The definition il we used to find this link
         self.block = block
 
+        # Resolve the true/false blocks
         self.true_block = true_block.outgoing_edges[0].target
         self.false_block = false_block
         if self.false_block is not None:
@@ -24,6 +36,24 @@ class CFGLink(object):
         return not self.is_uncond
 
     def gen_asm(self, bv, base_addr):
+        """ Generates a patch to repair this link
+
+        For an unconditional jump, this will generate
+            jmp next_block
+
+        For a conditional jump, this will generate
+            jcc true_block
+            jmp false_block
+        where cc is the condition used in the original CMOVcc in the flattening logic
+
+        Args:
+            bv (BinaryView)
+            base_addr (int): The address where these instructions will be placed.
+                This is necessary to calculate relative addresses
+
+        Returns:
+            str: The assembled patch opcodes
+        """
         # It's assumed that base_addr is the start of free space
         # at the end of a newly recovered block
         def rel(addr):
@@ -32,15 +62,15 @@ class CFGLink(object):
         # Unconditional jmp
         if self.is_uncond:
             next_addr = self.true_block.start
-            print "[+] Patching from {:x} to {:x}".format(base_addr, next_addr)
-            return safe_asm(bv, "jmp {}".format(rel(next_addr)))
+            print '[+] Patching from {:x} to {:x}'.format(base_addr, next_addr)
+            return safe_asm(bv, 'jmp {}'.format(rel(next_addr)))
 
         # Branch based on original cmovcc
         else:
             assert self.il is not None
             true_addr = self.true_block.start
             false_addr = self.false_block.start
-            print "[+] Patching from {:x} to T: {:x} F: {:x}".format(base_addr,
+            print '[+] Patching from {:x} to T: {:x} F: {:x}'.format(base_addr,
                                                                      true_addr,
                                                                      false_addr)
 
@@ -60,7 +90,6 @@ class CFGLink(object):
 
             return asm
 
-
     def __repr__(self):
         if self.is_uncond:
             return '<U Link: {} => {}>'.format(self.block,
@@ -71,18 +100,41 @@ class CFGLink(object):
                                                          self.false_block)
 
 
-def ComputeBackboneCmps(bv, mlil, stateVar):
+def compute_backbone_map(bv, mlil, state_var):
+    """ Recover the map of state values to backbone blocks
+
+    This will generate a map of
+    {
+        state1 => BasicBlock1,
+        state2 => BasicBlock2,
+        ...
+    }
+
+    Where BasicBlock1 is the block in the backbone that will dispatch to
+    an original block if the state is currently equal to state1
+
+    Args:
+        bv (BinaryView)
+        mlil (MediumLevelILFunction): The MLIL for the function to be deflattened
+        state_var (Variable): The state variable in the MLIL
+
+    Returns:
+        dict: map of {state value => backbone block}
+    """
     backbone = {}
 
+    # The state variable itself isn't always the one referenced in the
+    # backbone blocks, they may instead use another pointer to it.
     # Find the variable that all subdispatchers use in comparisons
-    var = stateVar
+    var = state_var
     uses = mlil.get_var_uses(var)
+    # The variable with >2 uses is probable the one in the backbone blocks
     while len(uses) <= 2:
         var = mlil[uses[-1]].dest
         uses = mlil.get_var_uses(var)
     uses += mlil.get_var_definitions(var)
 
-    # Gather the blocks where this is used
+    # Gather the blocks where this variable is used
     blks = (b for idx in uses for b in mlil.basic_blocks if b.start <= idx < b.end)
 
     # In each of these blocks, find the value of the state
@@ -98,13 +150,41 @@ def ComputeBackboneCmps(bv, mlil, stateVar):
     return backbone
 
 
-def ComputeOriginalBlocks(bv, mlil, stateVar):
-    original = mlil.get_var_definitions(stateVar)
+def compute_original_blocks(bv, mlil, state_var):
+    """ Gathers all MLIL instructions that (re)define the state variable
+    Args:
+        bv (BinaryView)
+        mlil (MediumLevelILFunction): The MLIL for the function to be deflattened
+        state_var (Variable): The state variable in the MLIL
+
+    Returns:
+        tuple: All MediumLevelILInstructions in mlil that update state_var
+    """
+    original = mlil.get_var_definitions(state_var)
     return itemgetter(*original)(mlil)
 
 
-def ResolveCFGLink(bv, mlil, il, backbone):
-    # il refers to a definition of the stateVar
+def resolve_cfg_link(bv, mlil, il, backbone):
+    """ Resolves the true successors of a block
+
+    When there is only one successor, the state variable is set to a constant,
+    so we simply look this new state in the backbone map
+
+    When there are 2 successors, we rely on SSA form to decide which successor
+    state is the true/false branch. Of the two possible values that the next state
+    may be, the earlier version (default value) corresponds to the false branch
+
+    Args:
+        bv (BinaryView)
+        mlil (MediumLevelILFunction): The MLIL for the function to be deflattened
+        il (MediumLevelILInstruction): An instruction in one of the original blocks
+            that updates the state variable
+        backbone (dict): map of {state value => backbone block}
+
+    Returns:
+        CFGLink: a link with the resolved successors for the block il was contained in
+    """
+    # il refers to a definition of the state_var
     bb = bv.get_basic_blocks_at(il.address)[0]
 
     # Unconditional jumps will set the state to a constant
@@ -132,7 +212,16 @@ def ResolveCFGLink(bv, mlil, il, backbone):
 
 
 def clean_block(bv, mlil, link):
-    # Return the data for a block with all unnecessary instructions removed
+    """ Return the data for a block with all unnecessary instructions removed
+
+    Args:
+        bv (BinaryView)
+        mlil (MediumLevelILFunction): The MLIL for the function to be deflattened
+        link (CFGLink): a link with the resolved successors for a block
+
+    Returns:
+        str: A copy of the block link is based on with all dead instructions removed
+    """
 
     # Helper for resolving new addresses for relative calls
     def _fix_call(bv, addr, newaddr):
@@ -170,7 +259,14 @@ def clean_block(bv, mlil, link):
 
 
 def gather_full_backbone(backbone_map):
-    """ Collect all blocks that are part of the backbone """
+    """ Collect all blocks that are part of the backbone
+
+    Args:
+        backbone_map (dict): map of {state value => backbone block}
+
+    Returns:
+        set: All BasicBlocks involved in any form in the backbone
+    """
     # Get the immediately known blocks from the map
     backbone_blocks = backbone_map.values()
     backbone_blocks += [bb.outgoing_edges[1].target for bb in backbone_blocks]
@@ -186,24 +282,31 @@ def gather_full_backbone(backbone_map):
     return set(backbone_blocks)
 
 
-def DeFlattenCFG(bv, addr):
+def deflatten_cfg(bv, addr):
+    """ Reverses the control flow flattening pass from OLLVM
+
+    Args:
+        bv (BinaryView)
+        addr (int): Selected address in the view. This should be an
+            instruction where the state variable is updated
+    """
     func = bv.get_basic_blocks_at(addr)[0].function
     mlil = func.medium_level_il
-    stateVar = func.get_low_level_il_at(addr).medium_level_il.dest
+    state_var = func.get_low_level_il_at(addr).medium_level_il.dest
 
-    # compute all usages of the stateVar
-    backbone = ComputeBackboneCmps(bv, mlil, stateVar)
-    print "[+] Computed backbone"
+    # compute all usages of the state_var
+    backbone = compute_backbone_map(bv, mlil, state_var)
+    print '[+] Computed backbone'
     pprint(backbone)
 
-    # compute all the defs of the stateVar in the original basic blocks
-    original = ComputeOriginalBlocks(bv, mlil, stateVar)
-    print "[+] Usages of the state variable in original basic blocks"
+    # compute all the defs of the state_var in the original basic blocks
+    original = compute_original_blocks(bv, mlil, state_var)
+    print '[+] Usages of the state variable in original basic blocks'
     pprint(original)
 
     # at this point we have all the information to reconstruct the CFG
-    CFG = [ResolveCFGLink(bv, mlil, il, backbone) for il in original]
-    print "[+] Computed original CFG"
+    CFG = [resolve_cfg_link(bv, mlil, il, backbone) for il in original]
+    print '[+] Computed original CFG'
     pprint(CFG)
 
     # patch in all the changes
@@ -217,11 +320,13 @@ def DeFlattenCFG(bv, addr):
         blockdata = blockdata.ljust(orig_len, safe_asm(bv, 'nop'))
         bv.write(link.block.start, blockdata)
 
-    print "[+] NOPing backbone"
+    # Do some final cleanup
+    print '[+] NOPing backbone'
     nop = safe_asm(bv, 'nop')
     for bb in gather_full_backbone(backbone):
-        print 'NOPing block: {}'.format(bb)
+        print '[+] NOPing block: {}'.format(bb)
         bv.write(bb.start, nop * bb.length)
+
 
 """
 Example CFG:
@@ -233,4 +338,3 @@ Example CFG:
  <C Link: <block: x86_64@0x400699-0x4006b4> => T: <block: x86_64@0x4006b4-0x4006d4>, F: <block: x86_64@0x4006d4-0x4006e7>>,
  <U Link: <block: x86_64@0x400720-0x400735> => <block: x86_64@0x4006e7-0x400700>>]
 """
-

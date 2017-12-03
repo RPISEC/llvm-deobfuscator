@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 from binaryninja import *
-from .deflatten import DeFlattenCFG
+from .deflatten import deflatten_cfg
 
 
 class RunInBackground(BackgroundTaskThread):
@@ -19,7 +19,7 @@ class RunInBackground(BackgroundTaskThread):
 
 
 def DeFlattenBackgrounder(bv, addr):
-    s = RunInBackground(bv, addr, "Removing Control Flow Flattening", DeFlattenCFG)
+    s = RunInBackground(bv, addr, "Removing Control Flow Flattening", deflatten_cfg)
     s.start()
 
 
