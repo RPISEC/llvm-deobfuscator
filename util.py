@@ -32,3 +32,19 @@ def gather_defs(il, defs):
 
     if hasattr(il, 'src') and isinstance(il.src, MediumLevelILInstruction):
         gather_defs(il.src, defs)
+
+
+def llil_at(bv, addr):
+    funcs = bv.get_functions_containing(addr)
+    if funcs is None:
+        return None
+
+    return funcs[0].get_low_level_il_at(addr)
+
+
+def is_call(bv, addr):
+    llil = llil_at(bv, addr)
+    if llil is None:
+        return False
+
+    return llil.operation == LowLevelILOperation.LLIL_CALL

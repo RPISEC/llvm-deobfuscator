@@ -134,6 +134,12 @@ def ResolveCFGLink(bv, mlil, il, backbone):
 def clean_block(bv, mlil, link):
     # Return the data for a block with all unnecessary instructions removed
 
+    # Helper for resolving new addresses for relative calls
+    def _fix_call(bv, addr, newaddr):
+        tgt = llil_at(bv, addr).dest.constant
+        reladdr = hex(tgt - newaddr).rstrip('L')
+        return safe_asm(bv, 'call {}'.format(reladdr))
+
     # The terminator gets replaced anyway
     block = link.block
     old_len = block.length
@@ -147,9 +153,18 @@ def clean_block(bv, mlil, link):
     addr = block.start
     data = ''
     while addr < block.end:
+        # How much data to read
         ilen = bv.get_instruction_length(addr)
+
+        # Only process this instruction if we haven't blacklisted it
         if addr not in nop_addrs:
-            data += bv.read(addr, ilen)
+            # Calls need to be handled separately to fix relative addressing
+            if is_call(bv, addr):
+                data += _fix_call(bv, addr, block.start + len(data))
+            else:
+                data += bv.read(addr, ilen)
+
+        # Next instruction
         addr += ilen
     return data, block.start + len(data), old_len
 
