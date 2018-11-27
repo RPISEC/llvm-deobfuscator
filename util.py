@@ -2,10 +2,7 @@ from binaryninja import *
 
 
 def safe_asm(bv, asm_str):
-    asm, err = bv.arch.assemble(asm_str)
-    if asm is None:
-        raise Exception(err)
-    return asm
+    return bv.arch.assemble(asm_str)
 
 
 def get_ssa_def(mlil, var):
