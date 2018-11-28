@@ -46,3 +46,9 @@ def is_call(bv, addr):
         return False
 
     return llil.operation == LowLevelILOperation.LLIL_CALL
+
+
+def get_func_containing(bv, addr):
+    """ Finds the function, if any, containing the given address """
+    funcs = bv.get_functions_containing(addr)
+    return funcs[0] if funcs is not None else None

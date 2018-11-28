@@ -290,7 +290,7 @@ def deflatten_cfg(bv, addr):
         addr (int): Selected address in the view. This should be an
             instruction where the state variable is updated
     """
-    func = bv.get_basic_blocks_at(addr)[0].function
+    func = get_func_containing(bv, addr)
     mlil = func.medium_level_il
     state_var = func.get_low_level_il_at(addr).medium_level_il.dest
 
