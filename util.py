@@ -7,7 +7,7 @@ def safe_asm(bv, asm_str):
 
 def get_ssa_def(mlil, var):
     """ Gets the IL that defines var in the SSA form of mlil """
-    return mlil.ssa_form[mlil.ssa_form.get_ssa_var_definition(var)]
+    return mlil.ssa_form.get_ssa_var_definition(var)
 
 
 def gather_defs(il, defs):
