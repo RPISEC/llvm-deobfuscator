@@ -34,7 +34,7 @@ def gather_defs(il, defs):
 
 def llil_at(bv, addr):
     funcs = bv.get_functions_containing(addr)
-    if funcs is None:
+    if not funcs:
         return None
 
     return funcs[0].get_low_level_il_at(addr)
@@ -51,4 +51,4 @@ def is_call(bv, addr):
 def get_func_containing(bv, addr):
     """ Finds the function, if any, containing the given address """
     funcs = bv.get_functions_containing(addr)
-    return funcs[0] if funcs is not None else None
+    return funcs[0] if funcs else None
