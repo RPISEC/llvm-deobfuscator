@@ -188,7 +188,7 @@ def resolve_cfg_link(bv, mlil, il, backbone):
     bb = bv.get_basic_blocks_at(il.address)[0]
 
     # Unconditional jumps will set the state to a constant
-    if il.src.operation == MediumLevelILOperation.MLIL_CONST:
+    if il.src.operation == MediumLevelILOperation.MLIL_CONST or il.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
         return CFGLink(bb, backbone[il.src.constant], def_il=il)
 
     # Conditional jumps choose between two values
