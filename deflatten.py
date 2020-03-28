@@ -135,7 +135,7 @@ def compute_backbone_map(bv, mlil, state_var):
     uses += mlil.get_var_definitions(var)
 
     # Gather the blocks where this variable is used
-    blks = (b for idx in uses for b in mlil.basic_blocks if b.start <= idx < b.end)
+    blks = (b for il in uses for b in mlil.basic_blocks if b.start <= il.instr_index < b.end)
 
     # In each of these blocks, find the value of the state
     for bb in blks:
