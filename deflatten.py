@@ -62,7 +62,7 @@ class CFGLink(object):
         # Unconditional jmp
         if self.is_uncond:
             next_addr = self.true_block.start
-            print '[+] Patching from {:x} to {:x}'.format(base_addr, next_addr)
+            print('[+] Patching from {:x} to {:x}'.format(base_addr, next_addr))
             return safe_asm(bv, 'jmp {}'.format(rel(next_addr)))
 
         # Branch based on original cmovcc
@@ -70,9 +70,9 @@ class CFGLink(object):
             assert self.il is not None
             true_addr = self.true_block.start
             false_addr = self.false_block.start
-            print '[+] Patching from {:x} to T: {:x} F: {:x}'.format(base_addr,
+            print('[+] Patching from {:x} to T: {:x} F: {:x}'.format(base_addr,
                                                                      true_addr,
-                                                                     false_addr)
+                                                                     false_addr))
 
             # Find the cmovcc by looking at the def il's incoming edges
             # Both parent blocks are part of the same cmov
@@ -240,7 +240,7 @@ def clean_block(bv, mlil, link):
 
     # Rebuild the block, skipping the bad instrs
     addr = block.start
-    data = ''
+    data = b''
     while addr < block.end:
         # How much data to read
         ilen = bv.get_instruction_length(addr)
@@ -268,7 +268,7 @@ def gather_full_backbone(backbone_map):
         set: All BasicBlocks involved in any form in the backbone
     """
     # Get the immediately known blocks from the map
-    backbone_blocks = backbone_map.values()
+    backbone_blocks = list(backbone_map.values())
     backbone_blocks += [bb.outgoing_edges[1].target for bb in backbone_blocks]
 
     # Some of these blocks might be part of a chain of unconditional jumps back to the top of the backbone
@@ -296,21 +296,21 @@ def deflatten_cfg(bv, addr):
 
     # compute all usages of the state_var
     backbone = compute_backbone_map(bv, mlil, state_var)
-    print '[+] Computed backbone'
+    print('[+] Computed backbone')
     pprint(backbone)
 
     # compute all the defs of the state_var in the original basic blocks
     original = compute_original_blocks(bv, mlil, state_var)
-    print '[+] Usages of the state variable in original basic blocks'
+    print('[+] Usages of the state variable in original basic blocks')
     pprint(original)
 
     # at this point we have all the information to reconstruct the CFG
     CFG = [resolve_cfg_link(bv, mlil, il, backbone) for il in original]
-    print '[+] Computed original CFG'
+    print('[+] Computed original CFG')
     pprint(CFG)
 
     # patch in all the changes
-    print '[+] Patching all discovered links'
+    print('[+] Patching all discovered links')
     for link in CFG:
         # Clean out instructions we don't need to make space
         blockdata, cave_addr, orig_len = clean_block(bv, mlil, link)
@@ -321,10 +321,10 @@ def deflatten_cfg(bv, addr):
         bv.write(link.block.start, blockdata)
 
     # Do some final cleanup
-    print '[+] NOPing backbone'
+    print('[+] NOPing backbone')
     nop = safe_asm(bv, 'nop')
     for bb in gather_full_backbone(backbone):
-        print '[+] NOPing block: {}'.format(bb)
+        print('[+] NOPing block: {}'.format(bb))
         bv.write(bb.start, nop * bb.length)
 
 
